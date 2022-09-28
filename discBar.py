@@ -22,9 +22,11 @@
 # version 0.1.9  31-jul-2022 WD  some re-naming, minor debugging
 # version 0.1.10 26-aug-2022 WD  correcting error for α=-1; refactoring a -> γ
 # version 0.2.0  29-aug-2022 WD  licensed (GPLv3) and published at github
+# version 0.2.1  05-sep-2022 WD  changed 'rod' --> 'needle'
+# version 0.2.2  14-sep-2022 WD  makeBulgeBar(), makeThinBar(), rescale_size()
 #
 
-version = '0.2.0'
+version = '0.2.2'
 
 """
 debugging level, defaults to 0
@@ -49,15 +51,15 @@ def debugInfo(debug_level, *args):
 class Convolve:
     """
     implement convolution
-        F(r,args;L,γ) = M/(2L) int{(1+γ-2γ|x-t|/L) f(t,args), t=x-l…x+l}
-                      = c1 [A(r+LX) - A(r-LX)] + c2 [C(r+LX) + C(r-LX) - 2C[r)]
-        with       c1 = M(1-γ)/(2L)
-                   c2 = Mγ/L²
+        Fn(r,args;L,γ) = M/(2L) int{(1+γ-2γ|x-t|/L) fn(t,args), t=x-l…x+l}
+                       = c1 [A(r+LX) - A(r-LX)] + c2 [C(r+LX) + C(r-LX) - 2C[r)]
+        with       c1  = M(1-γ)/(2L)
+                   c2  = Mγ/L²
     """
 
     def order(self):
         """
-        Return current order n
+        Return current order n of function fn
         """
         return self.__Fm.order()
 
@@ -80,17 +82,17 @@ class Convolve:
     def __init__(self, funcAC, M,x,L,g, args=()):
         """
         Parameters
-        funcAC : class for computing convolution integrals A and C
-            A = ∫ f(x,args) dx
-            C = x A - ∫ f(x,args) x dx
+        funcAC : class for computing convolution integrals An and Cn
+            An = ∫ fn(x,args) dx
+            Cn = x A - ∫ fn(x,args) x dx
         M : float
             total mass M
         x : float or array of floats
             coordinate x
         L : float
-            parameter L = rod half-length
+            parameter L = needle half-length
         g : float
-            parameter γ controlling the slope of the rod
+            parameter γ controlling the slope of the needle
         args : list of arguments
             further arguments passed to constructor of funcAC (after x) 
         """
@@ -299,9 +301,9 @@ def RFuncBarN(M, x,y,z, n, L,g):
     n : int
         initial order
     L : float > 0
-        parameter L = rod half-length
+        parameter L = needle half-length
     g : float
-        parameter γ controlling the slope of rod
+        parameter γ controlling the slope of needle
     """
     debugInfo(2,"RFuncBarN: M="+str(M)+" L="+str(L)+" γ="+str(g)+" n="+str(n))
     return Convolve(functionACRn, M=M, x=x, L=L, g=g, args=[y,z,n])
@@ -445,9 +447,9 @@ def LFuncBarZ(M, x,y,z1,z2, L,g):
     z2 : float or array of floats
         z coordinate in denominator of argument of logarithm
     L : float > 0
-        parameter L = rod half-length
+        parameter L = needle half-length
     g : float
-        parameter γ controlling the slope of rod
+        parameter γ controlling the slope of needle
     """
     return Convolve(functionACLZ, M=M, x=x, L=L, g=g, args=[y,z1,z2])
 
@@ -500,9 +502,9 @@ def LFuncBar0(M, x,z, L,g):
     z : float or array of floats
         coordinate z
     L : float > 0
-        parameter L = rod half-length
+        parameter L = needle half-length
     g : float
-        parameter γ controlling the slope of rod
+        parameter γ controlling the slope of needle
     """
     return Convolve(functionACL0, M=M, x=x, L=L,g=g, args=[z])
 
@@ -625,6 +627,26 @@ class model:
         re-scale the mass normalisation by factor factor
         """
         raise NotImplementedError("called for instance of abstract base class")
+
+    def rescale_height(self, factor):
+        """
+        re-scale the scale height by factor factor
+        """
+        raise NotImplementedError("called for instance of abstract base class")
+
+    def rescale_length(self, factor):
+        """
+        re-scale the scale length by factor factor
+        Note: for barred models the ratio a/L is kept fixed
+        """
+        raise NotImplementedError("called for instance of abstract base class")
+
+    def rescale_size(self, factor):
+        """
+        re-scale the size by factor factor
+        """
+        self.rescale_length(factor)
+        self.rescale_height(factor)
 
     def scan_models(self, func):
         """
@@ -768,7 +790,20 @@ class crossedModel(model):
         re-scale the mass normalisation by factor factor
         """
         self.__disc.rescale_mass(factor)
-    
+
+    def rescale_height(self, factor):
+        """
+        re-scale the scale height by factor factor
+        """
+        self.__disc.rescale_height(factor)
+
+    def rescale_length(self, factor):
+        """
+        re-scale the scale length by factor factor
+        Note: for barred models the ratio a/L is kept fixed
+        """
+        self.__disc.rescale_length(factor)
+
     def scan_models(self, func):
         func(self);
         
@@ -1016,7 +1051,7 @@ class collectionModel(model):
     
     def rescale_mass(self,factor):
         """
-        re-scale the mass of all models
+        re-scale the masses of all models
         Warning:
             since we don't keep deep copies, this will affect any handles
             of the component models
@@ -1025,7 +1060,38 @@ class collectionModel(model):
             self.__positive = [not p for p in self.__positive]
         elif factor !=  1:
             for model in __models:
-                model.scaleMass(factor)
+                model.rescale_mass(factor)
+
+    def rescale_size(self,factor):
+        """
+        re-scale the sizes of all models
+        Warning:
+            since we don't keep deep copies, this will affect any handles
+            of the component models
+        """
+        for model in __models:
+            model.rescale_size(factor)
+
+    def rescale_height(self, factor):
+        """
+        re-scale the scale heights of all models by factor factor
+        Warning:
+            since we don't keep deep copies, this will affect any handles
+            of the component models
+        """
+        for model in __models:
+            model.rescale_height(factor)
+
+    def rescale_length(self, factor):
+        """
+        re-scale the scale lengths of all models by factor factor
+        Note: for barred models the ratio a/L is kept fixed
+        Warning:
+            since we don't keep deep copies, this will affect any handles
+            of the component models
+        """
+        for model in __models:
+            model.rescale_length(factor)
 
     def __acc(self,result,i,contribution):
         if self.__positive[i]:
@@ -1132,15 +1198,15 @@ class singleModel(model):
         """
         return self.__T
     
-    def rod_length(self):
+    def needle_length(self):
         """
-        Return float: length L of rod used for convolution
+        Return float: length L of needle used for convolution
         """
         return self.__L
         
     def gamma(self):
         """
-        Return float: rod parameter γ
+        Return float: needle parameter γ
         """
         return self.__G
     
@@ -1249,14 +1315,40 @@ class singleModel(model):
             if gamma >  1.0:
                 raise Exception("γ = {:} > 1 not supported".format(gamma))
             self.__G = gamma
+        # data of self:
+        # __T  string: model type
+        # __M  float:  total mass
+        # __A  float:  scale length
+        # __B  float:  scale height
+        # __L  float:  half-length (radius) of the needle
+        # __G  float:  parameter γ controlling the slope of needle
                     
     def rescale_mass(self,factor):
         """
-        scale mass normalisation by factor
+        re-scale mass normalisation by factor
         """
         if factor == 0.0:
             raise Exception("factor = 0")
         self.__M *= factor
+
+    def rescale_height(self,factor):
+        """
+        re-scale scale height b by factor
+        """
+        if factor == 0.0:
+            raise Exception("factor = 0")
+        self.__A *= factor
+        self.__B *= factor
+        self.__L *= factor
+
+    def rescale_length(self,factor):
+        """
+        re-scale scale length a and needle length L by factor
+        """
+        if factor == 0.0:
+            raise Exception("factor = 0")
+        self.__A *= factor
+        self.__L *= factor
 
     def scan_models(self, func):
         func(self);
@@ -2042,6 +2134,9 @@ class singleModel(model):
 def makeSingleModel(mtype='T1', M=1.0, s=1.0, q=0.0, L=0.0, gamma=0.0, \
                     phi=0.0, a=None, b=None):
     """
+
+    create a single bar model of Dehnen & Aly (2022)
+
     Parameters:
     mtype : str
         one of 'Tk','Vk' with k in [0..4] or 'Dk','Wk' with k in [1..4]
@@ -2057,12 +2152,12 @@ def makeSingleModel(mtype='T1', M=1.0, s=1.0, q=0.0, L=0.0, gamma=0.0, \
         ratio q = b/s, if q=0 the model is razor thin, 0 ≤ q ≤ 1 is required
         Default is 0
     L : float
-        half-length L ≥ 0 of rod with which disc model is convolved
+        half-length L ≥ 0 of needle with which disc model is convolved
         Default is L=0
     gamma : float
-        parameter γ controlling the slope of rod
+        parameter γ controlling the slope of needle
         no effect if L=0. -1 ≤ γ ≤ 1 is required (for non-negative density)
-        Default is γ=0, when the rod density is constant
+        Default is γ=0, when the needle density is constant
     phi : float
         angle φ of bar axes with x-axis.
         If ≠ 0 two bars at angles  ± φ are generated
@@ -2171,3 +2266,28 @@ def makeHoledDisc(M,s,q,rh,mtype="T1",dk=0,a=None,b=None):
     debugInfo(2, " ρ2(0)={:} ρ2(s,0)={:}".\
               format(disc2.density(0,0,0),disc2.density(s1,0,0)))
     return disc1 - disc2
+
+# function makeBulgeBar()
+def makeBulgeBar():
+    """
+    create model 'bulge-bar' by Dehnen & Aly (2022)
+    """
+    peanut      = makeSingleModel(M=0.08,a=0.05,b=0.25,L=0.33,gamma=-0.95,
+                                  mtype='V4')
+    bar         = makeSingleModel(M=0.15,a=0.4,b=0.1,L=1.,gamma=0.1,phi=0.1047,
+                                  mtype='V4')
+    nuclearDisc = makeSingleModel(M=0.01,a=0.1,b=0.1,L=0.,gamma=0.,
+                                  mtype='V4')
+    outerDisc   = makeHoledDisc  (M=1.,s=1.6,q=0.05,rh=1.2,
+                                  mtype='V2')
+    return peanut + bar + nuclearDisc + outerDisc
+
+# function makeThinBar()
+def makeThinBar():
+    """
+    create model 'thin-bar' by Dehnen & Aly (2022)
+    """
+    bar         = makeSingleModel(M=0.15,a=0.3,b=0.1,L=1.,gamma=0.7,mtype='T3')
+    nuclearDisc = makeSingleModel(M=0.02,a=0.3,b=0.1,L=0.,gamma=0.,mtype='V4')
+    outerDisc   = makeHoledDisc  (M=1.,s=1.6,q=0.05,rh=1.2,mtype='V2')
+    return bar + nuclearDisc + outerDisc
