@@ -14,6 +14,7 @@
 ///
 /// \version jul-2022  WD  implemented
 /// \version aug-2022  WD  minor refactoring
+/// \version sep-2022  WD  numericalParameters, makeBulgeBar(), makeThinBar()
 ///
 ////////////////////////////////////////////////////////////////////////////////
 #ifndef included_discBar_h
@@ -35,25 +36,32 @@ using std::string;
 
 struct potImpl;
 
-/// parameters for a single disc-bar model
-struct parameters
+/// numerical parameters for a single disc-bar model
+struct numericalParameters
 {
-    double mass        = 1.0;  ///< total mass
-    double scaleRadius = 1.0;  ///< scale radius s=a+b
-    double axisRatio   = 0.0;  ///< axis ratio b/s
-    double barRadius   = 0.0;  ///< bar half-length L
-    double gamma       = 0.0;  ///< bar-slope parameter γ
-    double phi         = 0.0;  ///< if > 0  opening angle ±φ with x-axis
-    string modelType   = "T1"; ///< type of model: 'Tk' or 'Vk' with 1 ≤ k ≤ 4
-    /// set Miyamoto-Nagai parameters a and b rather than s=a+b and q=b/(a+b)
-    /// \throws if a < 0, b < 0, or a+b ≤ 0
-    void setAB(double a, double b = 0.0);
-    /// a = s(1-q)
-    double A() const noexcept { return (1-axisRatio) * scaleRadius; }
-    double scaleLength() const noexcept { return A(); }
-    /// b = sq
-    double B() const noexcept { return axisRatio * scaleRadius; }
-    double scaleHeight() const noexcept { return B(); }
+    double M = 1.0;  ///< total mass
+    double A = 1.0;  ///< scale length
+    double B = 0.0;  ///< scale height
+    double L = 0.0;  ///< bar half-length L
+    double G = 0.0;  ///< bar-slope parameter γ
+    double P = 0.0;  ///< if > 0  opening angle ±φ with x-axis
+
+    double scaleRadius() const noexcept { return A+B; }
+    double axisRatio() const noexcept { return B/scaleRadius(); }
+    /// set s=a+b and q=b/s instead of a,b
+    void setSQ(double s, double q = 0.0)
+    {
+	B = q*s;
+	A = s-B;
+    }
+};  // struct discBar::numericalParameters
+
+/// all parameters for a single disc-bar model
+struct parameters
+  : numericalParameters 
+{
+    string T = "T1"; ///< type of model: 'Tk' or 'Vk' with 1 ≤ k ≤ 4
+    string modelType() const noexcept { return T; }
     /// perform sanity check of parameters
     /// \throws  if any value is inf or nan
     /// \throws  if gamma < -1  or  gamma > 1
@@ -62,9 +70,13 @@ struct parameters
     /// \throws  if axisRatio < 0 or axisRatio > 1
     /// \throws  if modelType is unknown
     const parameters &sanityCheck(const char*caller=nullptr) const;
+
+    parameters() = default;
+    parameters(numericalParameters const&p, string const&t)
+      : numericalParameters(p), T(t) {}
 };  // struct discBar::parameters
 
-/// abstract base class for a disc-bar model, single or compound
+/// a disc-bar model, single or compound
 struct model
 {
     /// # individual components
@@ -106,6 +118,7 @@ struct model
 
     /// in case of a single-component model: parameters used to make it
     /// \throws if !isSingle()
+    /// \note see also member method scanParameters()
     virtual parameters params() const
     {
 	throw std::runtime_error("request for single-model parameters "
@@ -126,7 +139,19 @@ struct model
 
     /// re-scale the mass
     /// \throws if factor == 0
-    virtual void rescaleMass(double factor) = 0;
+    void rescaleMass(double factor);
+
+    /// re-scale the scale height (for single models: b)
+    /// \throws if factor == 0
+    void rescaleHeight(double factor);
+
+    /// re-scale the scale length (for single models: a and L)
+    /// \throws if factor == 0
+    void rescaleLength(double factor);
+
+    /// re-scale the size (for single models: a, L, and b)
+    /// \throws if factor == 0
+    void rescaleSize(double factor);
 
     /// Φ(x,y,z) and (optionally) its 1st and 2nd derivatives w.r.t. {x,y,z}
     /// \param[in]  x   [x,y,z]
@@ -176,6 +201,10 @@ struct model
     virtual double pot2D(const double*) const noexcept = 0;
     virtual double pot2D(const double*, double*) const noexcept = 0;
     virtual double pot2D(const double*, double*, double*) const noexcept = 0;
+
+    virtual void rescaleM(double) noexcept = 0;
+    virtual void rescaleH(double) noexcept = 0;
+    virtual void rescaleL(double) noexcept = 0;
     
 };  // struct discBar::model
 
@@ -201,6 +230,12 @@ modelPtr operator- (modelPtr const& a, modelPtr const& b) { return diff(a,b); }
 /// \param[in]  pars         parameters for model w/o hole, barRadius=0 set
 /// \param[in]  holeRadius   < pars.scaleRadius: radius of hole
 modelPtr makeHoledDisc(parameters const&pars, double holeRadius);
+
+/// create the 'bulge-bar' model of Dehnen & Aly (2022)
+modelPtr makeBulgeBar();
+
+/// create the 'thin-bar' model of Dehnen & Aly (2022)
+modelPtr makeThinBar();
 
 }   // namespace discBar
 

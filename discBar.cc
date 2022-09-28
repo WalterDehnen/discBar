@@ -17,6 +17,7 @@
 ///
 /// \version jul-2022  WD  implemented models T1-4, V1-4
 /// \version aug-2022  WD  minor refactoring, debugged models V2,V4
+/// \version sep-2022  WD  'rod' --> 'needle' in nameing & comments
 ///
 ////////////////////////////////////////////////////////////////////////////////
 #include "discBar.h"
@@ -62,57 +63,54 @@ inline constexpr double square(double x) noexcept
 inline constexpr double sign(double x) noexcept
 { return x<0.0? -1.0 : x>0.0? 1.0 : 0.0; }
 
-using type = int;
-
-inline constexpr char family(type T)
+inline constexpr char family(int T)
 { return "TV"[(T>>3) & 3]; }
 
-inline constexpr type family(char F)
+inline constexpr int family(char F)
 { return (F=='V'? 1 : 0) << 3; }
 
-inline constexpr int order(type T)
+inline constexpr int order(int T)
 { return T & 7; }
 
-inline constexpr type order(char K)
+inline constexpr int order(char K)
 { return K=='0'? 0 : K=='2'? 2: K=='3'? 3 : K=='4'? 4 : 1; }
 
-static constexpr type T1 =  1;
-static constexpr type T2 =  2;
-static constexpr type T3 =  3;
-static constexpr type T4 =  4;
-static constexpr type V1 =  9;
-static constexpr type V2 = 10;
-static constexpr type V3 = 11;
-static constexpr type V4 = 12;
+static constexpr int T1 =  1;
+static constexpr int T2 =  2;
+static constexpr int T3 =  3;
+static constexpr int T4 =  4;
+static constexpr int V1 =  9;
+static constexpr int V2 = 10;
+static constexpr int V3 = 11;
+static constexpr int V4 = 12;
 
-inline type thinType(type T)
+inline int thinType(int T)
 {
     return T&7;                 // t --> T
 }
 
-inline type sphericalType(type T)
+inline int sphericalType(int T)
 {
     return (T&24) | 1;          // k -> 1
 }
 
-inline type getType(string const&T)
+inline int getType(string const&T)
 {
     return family(T[0]) | order(T[1]);
 }
 
-inline string getName(type T)
+inline string getName(int T)
 {
     return family(T) + to_string(order(T)); 
 }
 
 /// internal representation of discBar parameters
 struct internalPars
+  : numericalParameters
 {
-    double A,B;
-    double L,G,P;
-    double M,F;
-    double C1,C2;
-    type   T;
+    double F;      // actual mass normalisation in rFunc
+    double C1,C2;  // actual mass normalisation in aFunc,bFunc
+    int    T;
 
     bool isRazorThin() const noexcept
     { return B <= 0; }
@@ -127,16 +125,11 @@ struct internalPars
     { return getName(T); }
 
     internalPars(parameters const&pars) noexcept
-      : A ( pars.scaleRadius*(1-pars.axisRatio) )
-      , B ( pars.scaleRadius*   pars.axisRatio  )
-      , L ( pars.barRadius )
-      , G ( pars.gamma )
-      , P ( L <= 0? 0 : abs(pars.phi) )
-      , M ( pars.mass )
+      : numericalParameters(pars)
       , F ( -M * ((P>0 || P<0)? 0.5 : 1.0) )
-      , C1( L <= 0? 0 : 0.5*F*(1-G) / L    )
-      , C2( L <= 0? 0 :     F*   G  /(L*L) )
-      , T ( getType(pars.modelType) )
+      , C1( L <= 0? 0 : 0.5*F*(1-G)/L )
+      , C2( L <= 0? 0 : F*G/(L*L) )
+      , T ( getType(pars.T) )
     {
 	if(A <= 0) T = sphericalType(T);  else 
 	if(B <= 0) T = thinType(T);
@@ -144,23 +137,29 @@ struct internalPars
     
     parameters params() const
     {
-	parameters pars;
-	pars.mass = M;
-	pars.scaleRadius = A+B;
-	pars.axisRatio = B/pars.scaleRadius;
-	pars.barRadius = L;
-	pars.gamma = G;
-	pars.phi = P;
-	pars.modelType = modelType();
-	return pars;
+	return {static_cast<const numericalParameters&>(*this),modelType()};
     }
 
-    void rescaleMass(double factor)
+    void rescaleMass(double factor) noexcept
     {
-	if(factor <= 0 && factor >= 0)
-	    throw runtime_error("mass re-scale factor = 0");
-	M *= factor;
-	F *= factor;
+	M  *= factor;
+	F  *= factor;
+	C1 *= factor;
+	C2 *= factor;
+    }
+
+    void rescaleHeight(double factor) noexcept
+    {
+	B *= factor;
+    }
+
+    void rescaleLength(double factor) noexcept
+    {
+	A *= factor;
+	L *= factor;
+	factor = 1/factor;
+	C1 *= factor;
+	C2 *= factor*factor;
     }
 
     void flipSign()
@@ -177,6 +176,16 @@ struct internalPars
     }
     
 };  // struct internalPars
+
+inline int type(internalPars const&pars) noexcept
+{
+    return pars.T;
+}
+
+inline int type(parameters const&pars) noexcept
+{
+    return getType(pars.T);
+}
 
 // Fn = Λ/r^n  (unconvolved, used for axisymmetric models)
 class rFunc
@@ -302,7 +311,7 @@ struct funcAC
     { return AX; }
 };  // class funcAC
 
-// Fn = F / r^n convolved with constant rod density
+// Fn = F / r^n convolved with constant needle density
 class aFunc
 {
     funcAC Am,Ap;
@@ -348,7 +357,7 @@ class aFunc
 };  // class aFunc
 
 
-// F/r^n convolved with a rod at |x|<l of linear density
+// F/r^n convolved with a needle at |x|<l of linear density
 class bFunc
 {
     const double C1,C2;
@@ -461,7 +470,7 @@ inline void convert3D(double*d1P, double*d2P, double y, double Z) noexcept
     d1P[1]     *= y;
 }
     
-template<typename, type> struct inputModel;
+template<typename, int> struct inputModel;
 
 // type T1: Kuzmin/Plummer/Miyamoto-Nagai models
 // Ψ(x,y,Z) = -M w1 C1
@@ -474,12 +483,14 @@ template<typename psiFunc> struct inputModel<psiFunc,T1>
 
     static constexpr auto Type = T1;
     
-    explicit inputModel(const internalPars&p)
+    template<typename pars>
+    explicit inputModel(const pars&p)
       : internalPars(p)
     {
-	assert(p.T == Type);
+	assert(type(p) == Type);
 	psiFunc::assertPars(this);
     }
+
     // Ψ(r)
     double phi(double x, double y, double Z) const noexcept
     {
@@ -550,10 +561,11 @@ template<typename psiFunc> struct inputModel<psiFunc,T2>
 
     static constexpr auto Type = T2;
 
-    explicit inputModel(const internalPars&p)
+    template<typename pars>
+    explicit inputModel(const pars&p)
       : internalPars(p)
     {
-	assert(p.T == Type);
+	assert(type(p) == Type);
 	psiFunc::assertPars(this);
     }
 
@@ -674,10 +686,11 @@ template<typename psiFunc> struct inputModel<psiFunc,T3>
 
     static constexpr auto Type = T3;
 
-    explicit inputModel(const internalPars&p)
+    template<typename pars>
+    explicit inputModel(const pars&p)
       : internalPars(p)
     {
-	assert(p.T == Type);
+	assert(type(p) == Type);
 	psiFunc::assertPars(this);
     }
     
@@ -843,10 +856,11 @@ template<typename psiFunc> struct inputModel<psiFunc,T4>
 
     static constexpr auto Type = T4;
 
-    explicit inputModel(const internalPars&p)
+    template<typename pars>
+    explicit inputModel(const pars&p)
       : internalPars(p)
     {
-	assert(p.T == Type);
+	assert(type(p) == Type);
 	psiFunc::assertPars(this);
     }
     
@@ -1063,10 +1077,11 @@ template<typename psiFunc> struct inputModel<psiFunc,V1>
 
     static constexpr auto Type = V1;
 
-    explicit inputModel(const internalPars&p)
+    template<typename pars>
+    explicit inputModel(const pars&p)
       : internalPars(p), hB2(0.5*B*B)
     {
-	assert(p.T == Type);
+	assert(type(p) == Type);
 	psiFunc::assertPars(this);
     }
 
@@ -1202,10 +1217,11 @@ template<typename psiFunc> struct inputModel<psiFunc,V2>
 
     static constexpr auto Type = V2;
 
-    explicit inputModel(const internalPars&p)
+    template<typename pars>
+    explicit inputModel(const pars&p)
       : internalPars(p), hB2(0.5*B*B)
     {
-	assert(p.T == Type);
+	assert(type(p) == Type);
 	psiFunc::assertPars(this);
     }
 
@@ -1383,10 +1399,11 @@ template<typename psiFunc> struct inputModel<psiFunc,V3>
 
     static constexpr auto Type = V3;
 
-    explicit inputModel(const internalPars&p)
+    template<typename pars>
+    explicit inputModel(const pars&p)
       : internalPars(p), hB2(0.5*B*B)
     {
-	assert(p.T == Type);
+	assert(type(p) == Type);
 	psiFunc::assertPars(this);
     }
 
@@ -1615,10 +1632,11 @@ template<typename psiFunc> struct inputModel<psiFunc,V4>
 
     static constexpr auto Type = V4;
 
-    explicit inputModel(const internalPars&p)
+    template<typename pars>
+    explicit inputModel(const pars&p)
       : internalPars(p), hB2(0.5*B*B)
     {
-	assert(p.T == Type);
+	assert(type(p) == Type);
 	psiFunc::assertPars(this);
     }
 
@@ -1879,11 +1897,11 @@ template<typename psiFunc> struct inputModel<psiFunc,V4>
 
 };  // struct inputModel<V4>
 
-template<typename psiFunc, type Type, bool Xalgined>
+template<typename psiFunc, int Type, bool Xalgined>
 struct singleModel;
 
 /// a single model with Δφ = 0
-template<typename psiFunc, type Type>
+template<typename psiFunc, int Type>
 struct singleModel<psiFunc, Type, true>
   : discBar::model
   , inputModel<psiFunc,Type>
@@ -1892,8 +1910,8 @@ struct singleModel<psiFunc, Type, true>
     using InputModel::A;
     using InputModel::B;
 
-    explicit singleModel(internalPars const&pars,
-	bool checkAlgined=true) noexcept
+    template<typename Pars>
+    explicit singleModel(Pars const&pars, bool checkAlgined=true) noexcept
       : InputModel(pars)
     { if(checkAlgined) assert(pars.P <= 0 && pars.P >= 0); }
 
@@ -1912,8 +1930,14 @@ struct singleModel<psiFunc, Type, true>
     double totalMass() const noexcept override
     { return internalPars::M; }
 
-    void rescaleMass(double factor) override
+    void rescaleM(double factor) noexcept override
     { internalPars::rescaleMass(factor); }
+
+    void rescaleH(double factor) noexcept override
+    { internalPars::rescaleHeight(factor); }
+
+    void rescaleL(double factor) noexcept override
+    { internalPars::rescaleLength(factor); }
 
     parameters params() const override
     { return internalPars::params(); }
@@ -1994,7 +2018,7 @@ struct singleModel<psiFunc, Type, true>
 };  // struct singleModel<Xaligned = true>
 
 /// a single model with Δφ ≠ 0
-template<typename psiFunc, type Type>
+template<typename psiFunc, int Type>
 struct singleModel<psiFunc, Type, false>
   : discBar::model
 {
@@ -2003,7 +2027,8 @@ struct singleModel<psiFunc, Type, false>
     alignedModel F;
     const double C,S;
     
-    explicit singleModel(internalPars const&pars) noexcept
+    template<typename Pars>
+    explicit singleModel(Pars const&pars) noexcept
       : F(pars,false), C(cos(pars.P)), S(sin(pars.P))
     {
 	assert(pars.L > 0);
@@ -2028,13 +2053,19 @@ struct singleModel<psiFunc, Type, false>
     double totalMass() const noexcept override
     { return 2 * F.totalMass(); }
 
-    void rescaleMass(double factor) override
-    { F.rescaleMass(factor); }
+    void rescaleM(double factor) noexcept override
+    { F.rescaleM(factor); }
+
+    void rescaleH(double factor) noexcept override
+    { F.rescaleH(factor); }
+
+    void rescaleL(double factor) noexcept override
+    { F.rescaleL(factor); }
 
     parameters params() const override
     {
 	auto pars = F.params();
-	pars.mass*= 2.0;
+	pars.M *= 2.0;
 	return pars;
     }
 
@@ -2166,27 +2197,28 @@ struct singleModel<psiFunc, Type, false>
     }
 };  // struct singleModel<Xaligned = false>
 
-template<int Type>
-modelPtr makeSingleT(internalPars const&pars)
+template<int Type, typename Pars>
+modelPtr makeSingleT(Pars const&pars)
 {
     if (pars.L <= 0.0)
 	// axisymmetric
 	return        make_unique<singleModel<rFunc,Type,1>>(pars);
     const auto P0 = pars.P <=0 && pars.P >= 0;
     if (pars.G <= 0.0 && pars.G >= 0.0) {
-	// barred with constant rod-density
+	// barred with constant needle-density
 	if(P0) return make_unique<singleModel<aFunc,Type,1>>(pars);
 	else   return make_unique<singleModel<aFunc,Type,0>>(pars);
     } else {
- 	// barred with linear rod-density
+ 	// barred with linear needle-density
 	if(P0) return make_unique<singleModel<bFunc,Type,1>>(pars);
 	else   return make_unique<singleModel<bFunc,Type,0>>(pars);
     }
 }
 
-modelPtr makeSingle(internalPars const&pars)
+template<typename Pars>
+modelPtr makeSingle(Pars const&pars, int T)
 {
-    switch(pars.T) {
+    switch(T) {
     case T1: return makeSingleT<T1>(pars);
     case T2: return makeSingleT<T2>(pars);
     case T3: return makeSingleT<T3>(pars);
@@ -2200,6 +2232,16 @@ modelPtr makeSingle(internalPars const&pars)
     }
 }
 
+inline modelPtr makeSingle(internalPars const&pars)
+{
+    return makeSingle(pars,pars.T);
+}
+
+inline modelPtr makeSingle(parameters const&pars)
+{
+    return makeSingle(pars,getType(pars.T));
+}
+    
 /// a collection of individual models
 struct collectionModel
   : model
@@ -2221,11 +2263,23 @@ struct collectionModel
     double totalMass() const noexcept override
     { return Mtotal; }
 
-    void rescaleMass(double factor) override
+    void rescaleM(double factor) noexcept override
     {
 	for(auto&mod : models)
-	    mod->rescaleMass(factor);
+	    mod->rescaleM(factor);
 	Mtotal *= factor;
+    }
+
+    void rescaleH(double factor) noexcept override
+    {
+	for(auto&mod : models)
+	    mod->rescaleH(factor);
+    }
+
+    void rescaleL(double factor) noexcept override
+    {
+	for(auto&mod : models)
+	    mod->rescaleL(factor);
     }
 
     void scanParameters(
@@ -2330,57 +2384,57 @@ struct collectionModel
 	auto coll = make_unique<collectionModel>
 	    (reserveExtra + numComponents());
 	for(const auto&mod : models)
-	    coll->addSimple(mod->clone(),flipSign);
+	    coll->appendSingle(mod->clone(),flipSign);
 	return coll;
     }
 
     modelPtr clone() const noexcept override
     { return cloneImpl(0); }
 
-    void addSimple(modelPtr const&mod, bool flipSign = false)
+    void appendSingle(modelPtr const&mod, bool flipSign = false)
     {
 	models.push_back(mod->clone());
-	auto&added = models.back();
+	auto&appended = models.back();
 	if( flipSign )
-	    added->flipSign();
-	Mtotal  += added->totalMass();
-	numThin += added->numRazorThin();
-	numSphr += added->numSpherical();
-	numBars += added->numBarred();
+	    appended->flipSign();
+	Mtotal  += appended->totalMass();
+	numThin += appended->numRazorThin();
+	numSphr += appended->numSpherical();
+	numBars += appended->numBarred();
     }
 
-    void addSimple(modelPtr &&mod, bool flipSign = false)
+    void appendSingle(modelPtr &&mod, bool flipSign = false)
     {
 	models.push_back(std::move(mod));
-	auto&added = models.back();
+	auto&appended = models.back();
 	if( flipSign )
-	    added->flipSign();
-	Mtotal  += added->totalMass();
-	numThin += added->numRazorThin();
-	numSphr += added->numSpherical();
-	numBars += added->numBarred();
+	    appended->flipSign();
+	Mtotal  += appended->totalMass();
+	numThin += appended->numRazorThin();
+	numSphr += appended->numSpherical();
+	numBars += appended->numBarred();
     }
 
-    void add(modelPtr const&mod, bool flipSign = false)
+    void append(modelPtr const&mod, bool flipSign = false)
     {
 	if(mod->isCollection()) {
 	    auto coll = static_cast<const collectionModel*>(mod.get());
 	    for(const auto&submod : coll->models)
-		addSimple(submod,flipSign);
+		appendSingle(submod,flipSign);
 	} else
-	    addSimple(mod,flipSign);
+	    appendSingle(mod,flipSign);
     }
 
-    void add(modelPtr &&mod, bool flipSign = false)
+    void append(modelPtr &&mod, bool flipSign = false)
     {
 	if(mod->isCollection()) {
 	    auto coll = static_cast<collectionModel*>(mod.get());
 	    for(auto&&submod : coll->models)
-		addSimple(std::move(submod),flipSign);
+		appendSingle(std::move(submod),flipSign);
 	    coll->models.clear();
 	    coll->Mtotal = 0.0;
 	} else
-	    addSimple(std::move(mod),flipSign);
+	    appendSingle(std::move(mod),flipSign);
     }
 
     collectionModel(size_t reserve = 2)
@@ -2396,74 +2450,114 @@ struct collectionModel
 
 using collPtr = unique_ptr<collectionModel>;
 
+collPtr makeHollowDisc(parameters const&p, double holeRadius)
+{
+    p.sanityCheck();
+    if(p.T[1]=='0' || (p.T[0]!='T' && p.T[0]!='V'))
+	throw runtime_error("discBar::makeHoledDisc(): model type '" + p.T
+	    + "' not supported");
+    internalPars pars(p);
+    double b1=pars.B, s1=pars.A + b1;
+    if(holeRadius >= s1)
+	throw runtime_error("discBar::makeHoledDisc(): holeRadius="
+	    + to_string(holeRadius) + " ≥ scale-radius s = " + to_string(s1));
+    if(holeRadius <= b1)
+	throw runtime_error("discBar::makeHoledDisc(): holeRadius="
+	    + to_string(holeRadius) + " ≤ scale-height b = " + to_string(b1));
+    auto disc1 = makeSingle(pars);
+    pars.A = holeRadius - b1;
+    auto disc2 = makeSingle(pars);
+    const double x[3] = {0.0,0.0,0.0};
+    disc2->rescaleMass(-disc1->density(x)/disc2->density(x));
+
+    collPtr coll = make_unique<collectionModel>();
+    coll->append(disc1);
+    coll->append(disc2);
+    return coll;
+}
+
 }   // namespace {
 
 namespace discBar {
     
-#define checkFinite(value,caller)					\
-    if(isinf(value) || isnan(value))					\
-	throw runtime_error(string(caller) + ": " + #value + '='	\
+#define checkFinite(value,name,caller)		       		\
+    if(isinf(value) || isnan(value))	       			\
+	throw runtime_error(string(caller) + ": " + name + '='	\
 	    + to_string(value) + " is not finite");
-
-void parameters::setAB(double a, double b)
-{
-    checkFinite(a,"discBar::parameters");
-    checkFinite(b,"discBar::parameters");
-    if(a < 0)
-	throw runtime_error("orbit::discParameters: a="
-	    + to_string(a) + " < 0");
-    if(b < 0)
-	throw runtime_error("orbit::discParameters: b="
-	    + to_string(b) + " < 0");
-    scaleRadius = a + b;
-    if(scaleRadius <= 0)
-	throw runtime_error("orbit::discParameters: s=a+b="
-	    + to_string(scaleRadius) + " ≤ 0");
-    axisRatio = b/scaleRadius;
-}
 
 parameters const&
 parameters::sanityCheck(const char* caller) const
 {
-    checkFinite(mass,        caller?caller:"discBar::parameters");
-    checkFinite(scaleRadius, caller?caller:"discBar::parameters");
-    checkFinite(axisRatio,   caller?caller:"discBar::parameters");
-    checkFinite(barRadius,   caller?caller:"discBar::parameters");
-    checkFinite(gamma,       caller?caller:"discBar::parameters");
-    checkFinite(phi,         caller?caller:"discBar::parameters");
+    checkFinite(M, 'M', caller ? caller : "discBar::parameters");
+    checkFinite(A, 'a', caller ? caller : "discBar::parameters");
+    checkFinite(B, 'b', caller ? caller : "discBar::parameters");
+    checkFinite(L, 'L', caller ? caller : "discBar::parameters");
+    checkFinite(G, "γ", caller ? caller : "discBar::parameters");
+    checkFinite(P, "φ", caller ? caller : "discBar::parameters");
+
 #undef checkFinite
 
-    if(gamma < -1)
+    if(G < -1)
 	throw runtime_error(string(caller?caller:"orbit::discParameters")
-	    + ": γ=" + to_string(gamma) + " < -1"); 
-    if(gamma > 1)
+	    + ": γ=" + to_string(G) + " < -1"); 
+    if(G > 1)
 	throw runtime_error(string(caller?caller:"orbit::discParameters")
-	    + ": γ=" + to_string(gamma) + " > 1");
-    if(scaleRadius <= 0)
+	    + ": γ=" + to_string(G) + " > 1");
+    if(A < 0)
 	throw runtime_error(string(caller?caller:"orbit::discParameters")
-	    + ": s=" + to_string(scaleRadius) + " ≤ 0");
-    if(axisRatio < 0)
+	    + ": a=" + to_string(A) + " < 0");
+    if(B < 0)
 	throw runtime_error(string(caller?caller:"orbit::discParameters")
-	    + ": q=" + to_string(axisRatio) + " < 0");
-    if(axisRatio > 1)
+	    + ": b=" + to_string(B) + " < 0");
+    if(A+B <= 0)
 	throw runtime_error(string(caller?caller:"orbit::discParameters")
-	    + ": q=" + to_string(axisRatio) + " > 1");
-    if(barRadius < 0)
+	    + ": a+b=" + to_string(A+B) + " ≤ 0");
+    if(L < 0)
 	throw runtime_error(string(caller?caller:"orbit::discParameters")
-	    + ": q=" + to_string(barRadius) + " < 0");
-    if(mass <= 0 && mass >= 0)
+	    + ": L=" + to_string(L) + " < 0");
+    if(M <= 0 && M >= 0)
 	throw runtime_error(string(caller?caller:"orbit::discParameters")
-	    + ": M=" + to_string(mass) + " = 0");
-    if( modelType.length() != 2 ||
-	string("TV").find(modelType[0]) == string::npos ||
-	string("1234").find(modelType[1]) == string::npos)
+	    + ": M=" + to_string(M) + " = 0");
+
+    if( T.length() != 2 ||
+	string("TV").find(T[0]) == string::npos ||
+	string("1234").find(T[1]) == string::npos)
 	throw runtime_error(string(caller?caller:"orbit::discParameters")
-	    + ": type '" +modelType + "' unknown");
+	    + ": model type '" + T + "' unknown");
     return*this;
 }
 
 //  this is non-inline to force the generation of typyinfo and vtable
 model::~model() {}
+
+void model::rescaleMass(double factor)
+{
+    if(factor <= 0 && factor >= 0)
+	throw runtime_error("mass re-scale factor = 0");
+    rescaleM(factor);
+}
+
+void model::rescaleHeight(double factor)
+{
+    if(factor <= 0 && factor >= 0)
+	throw runtime_error("height re-scale factor = 0");
+    rescaleH(factor);
+}
+
+void model::rescaleLength(double factor)
+{
+    if(factor <= 0 && factor >= 0)
+	throw runtime_error("length re-scale factor = 0");
+    rescaleL(factor);
+}
+
+void model::rescaleSize(double factor)
+{
+    if(factor <= 0 && factor >= 0)
+	throw runtime_error("size re-scale factor = 0");
+    rescaleH(factor);
+    rescaleL(factor);
+}
 
 double model::density(const double*x) const
 {
@@ -2484,7 +2578,7 @@ modelPtr makeSingleModel(parameters const&pars, bool check)
 {
     if(check)
 	pars.sanityCheck();
-    return makeSingle(internalPars(pars));
+    return makeSingle(pars);
 }
 
 modelPtr sum(modelPtr const&a, modelPtr const&b)
@@ -2493,15 +2587,15 @@ modelPtr sum(modelPtr const&a, modelPtr const&b)
     if(a->isCollection()) {
 	coll = static_cast<const collectionModel*>(a.get())->
 	    cloneImpl(b->numComponents());
-	coll->add(b);
+	coll->append(b);
     } else if(b->isCollection()) {
 	coll = static_cast<const collectionModel*>(b.get())->
 	    cloneImpl(a->numComponents());
-	coll->add(a);
+	coll->append(a);
     } else {
 	coll = make_unique<collectionModel>();
-	coll->add(a);
-	coll->add(b);
+	coll->append(a);
+	coll->append(b);
     }	
     return coll;
 }
@@ -2512,39 +2606,77 @@ modelPtr diff(modelPtr const&a, modelPtr const&b)
     if(a->isCollection()) {
 	coll = static_cast<const collectionModel*>(a.get())->
 	    cloneImpl(b->numComponents());
-	coll->add(b,true);
+	coll->append(b,true);
     } else if(b->isCollection()) {
 	coll = static_cast<const collectionModel*>(b.get())->
 	    cloneImpl(a->numComponents(), true);
-	coll->add(a);
+	coll->append(a);
     } else {
 	coll = make_unique<collectionModel>();
-	coll->add(a);
-	coll->add(b, true);
+	coll->append(a);
+	coll->append(b,true);
     }	
     return coll;
 }
 
-modelPtr makeHoledDisc(parameters const&p, double holeRadius)
+modelPtr makeHoledDisc(parameters const&pars, double holeRadius)
 {
-    p.sanityCheck();
-    if(p.modelType[1]=='0' || (p.modelType[0]!='T' && p.modelType[0]!='V'))
-	throw runtime_error("discBar::makeHoledDisc(): model type '"
-	    + p.modelType + "' not supported");
-    internalPars pars(p);
-    double b1=pars.B, s1=pars.A + b1;
-    if(holeRadius >= s1)
-	throw runtime_error("discBar::makeHoledDisc(): holeRadius="
-	    + to_string(holeRadius) + " ≥ scale-radius s = " + to_string(s1));
-    if(holeRadius <= b1)
-	throw runtime_error("discBar::makeHoledDisc(): holeRadius="
-	    + to_string(holeRadius) + " ≤ scale-height b = " + to_string(b1));
-    auto disc1 = makeSingle(pars);
-    pars.A = holeRadius - b1;
-    auto disc2 = makeSingle(pars);
-    const double x[3] = {0.0,0.0,0.0};
-    disc2->rescaleMass(disc1->density(x)/disc2->density(x));
-    return diff(disc1,disc2);
+    return makeHollowDisc(pars,holeRadius);
+}
+
+modelPtr makeBulgeBar()
+{
+    parameters pars;
+    // hollow disc
+    pars.T = "V2";
+    pars.setSQ(1.6, 0.05);
+    auto disc = makeHollowDisc(pars, 1.2);
+    // nuclear disc
+    pars.T = "V4";
+    pars.M = 0.01;
+    pars.A = 0.1;
+    pars.B = 0.1;
+    disc->append(makeSingleModel(pars));
+    // bulge peanut
+    pars.M = 0.08;
+    pars.A = 0.05;
+    pars.B = 0.25;
+    pars.L = 0.33;
+    pars.G =-0.95;
+    disc->append(makeSingleModel(pars));
+    // bar
+    pars.M = 0.15;
+    pars.A = 0.4;
+    pars.B = 0.1;
+    pars.L = 1.0;
+    pars.G = 0.1;
+    pars.P = 0.1047;
+    disc->append(makeSingleModel(pars));
+    return disc;
+}
+
+modelPtr makeThinBar()
+{
+    parameters pars;
+    // hollow disc
+    pars.T = "V2";
+    pars.setSQ(1.6, 0.05);
+    auto disc = makeHollowDisc(pars, 1.2);
+    // nuclear disc
+    pars.T = "V4";
+    pars.M = 0.02;
+    pars.A = 0.3;
+    pars.B = 0.1;
+    disc->append(makeSingleModel(pars));
+    // bar
+    pars.T = "T3";
+    pars.M = 0.15;
+    pars.A = 0.3;
+    pars.B = 0.1;
+    pars.L = 1.0;
+    pars.G = 0.7;
+    disc->append(makeSingleModel(pars));
+    return disc;
 }
 
 }   // namespace discBar
