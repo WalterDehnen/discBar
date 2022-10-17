@@ -24,9 +24,10 @@
 # version 0.2.0  29-aug-2022 WD  licensed (GPLv3) and published at github
 # version 0.2.1  05-sep-2022 WD  changed 'rod' --> 'needle'
 # version 0.2.2  14-sep-2022 WD  makeBulgeBar(), makeThinBar(), rescale_size()
+# version 0.2.3  17-oct-2022 WD  collectionModel.mass()
 #
 
-version = '0.2.2'
+version = '0.2.3'
 
 """
 debugging level, defaults to 0
@@ -620,7 +621,7 @@ class model:
         """
         Return float: total mass (may be zero)
         """
-        return 0.0
+        raise NotImplementedError("called for instance of abstract base class")
     
     def rescale_mass(self, factor):
         """
@@ -1048,6 +1049,12 @@ class collectionModel(model):
         copied.__positive = [not p for p in copied.__positive]
         copied.add(other)
         return copied
+
+    def mass(self):
+        m = 0.0
+        for model in self.__models:
+            m += model.mass()
+        return m
     
     def rescale_mass(self,factor):
         """
